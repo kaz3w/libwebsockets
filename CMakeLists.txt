@@ -603,6 +603,7 @@ endif()
 include_directories("${PROJECT_BINARY_DIR}")
 
 include(CheckCSourceCompiles)
+include (CheckCCompilerFlag)
 
 # Check for different inline keyword versions.
 foreach(KEYWORD "inline" "__inline__" "__inline")
@@ -1173,9 +1174,21 @@ if (UNIX)
 	endif()
 endif()
 
+# --as-needed only works on gcc + Linux
+
+unset(AS_NEEDED_FLAGS)
+
+if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
+	if ("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
+		CHECK_C_COMPILER_FLAG(-Wl,--as-needed LWS_HAVE_AS_NEEDED)
+		if (LWS_HAVE_AS_NEEDED)
+			set(AS_NEEDED_FLAGS "-Wl,--no-allow-shlib-undefined -Wl,--no-undefined -Wl,--as-needed")
+		endif()
+	endif()
+endif()
+
 if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX OR (CMAKE_C_COMPILER_ID MATCHES "Clang") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-    include (CheckCCompilerFlag)
-    CHECK_C_COMPILER_FLAG(-fvisibility=hidden LWS_HAVE_VISIBILITY)
+      CHECK_C_COMPILER_FLAG(-fvisibility=hidden LWS_HAVE_VISIBILITY)
     if (LWS_HAVE_VISIBILITY)
                 set(VISIBILITY_FLAG -fvisibility=hidden)
     endif()
@@ -1190,7 +1203,7 @@ if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX OR (CMAKE_C_COMPILER_ID 
     endif()
 
     if (UNIX AND NOT LWS_WITH_ESP32)
-	    set(CMAKE_C_FLAGS "-Wall -Wsign-compare -Wignored-qualifiers -Wtype-limits -Wuninitialized -Werror ${VISIBILITY_FLAG} -Wundef ${GCOV_FLAGS} ${CMAKE_C_FLAGS}" )
+	    set(CMAKE_C_FLAGS "-Wall -Wsign-compare -Wignored-qualifiers -Wtype-limits -Wuninitialized -Werror ${VISIBILITY_FLAG} -Wundef ${GCOV_FLAGS} ${CMAKE_C_FLAGS} ${AS_NEEDED_FLAGS}" )
     else()
 	    set(CMAKE_C_FLAGS "-Wall -Wsign-compare -Wignored-qualifiers -Wtype-limits -Wuninitialized -Werror ${VISIBILITY_FLAG} ${GCOV_FLAGS} ${CMAKE_C_FLAGS}" )
     endif()
@@ -1760,7 +1773,8 @@ if ((LWS_ROLE_H1 OR LWS_ROLE_H2) AND NOT LWS_WITHOUT_TESTAPPS)
 	if (UNIX AND LWS_WITH_PLUGINS)
 		set(CMAKE_C_FLAGS "-fPIC ${CMAKE_C_FLAGS}")
 		if(NOT((${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD") OR (${CMAKE_SYSTEM_NAME} MATCHES "QNX")))
-			target_link_libraries(websockets dl)
+			target_link_libraries(websockets ${CMAKE_DL_LIBS})
+			target_link_libraries(websockets_shared ${CMAKE_DL_LIBS})
 		endif()
 	endif()
 
