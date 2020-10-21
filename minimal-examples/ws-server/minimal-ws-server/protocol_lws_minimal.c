@@ -1,7 +1,7 @@
 /*
  * ws protocol handler plugin for "lws-minimal"
  *
- * Copyright (C) 2010-2018 Andy Green <andy@warmcat.com>
+ * Written in 2010-2019 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -152,36 +152,3 @@ callback_minimal(struct lws *wsi, enum lws_callback_reasons reason,
 		128, \
 		0, NULL, 0 \
 	}
-
-#if !defined (LWS_PLUGIN_STATIC)
-
-/* boilerplate needed if we are built as a dynamic plugin */
-
-static const struct lws_protocols protocols[] = {
-	LWS_PLUGIN_PROTOCOL_MINIMAL
-};
-
-LWS_EXTERN LWS_VISIBLE int
-init_protocol_minimal(struct lws_context *context,
-		      struct lws_plugin_capability *c)
-{
-	if (c->api_magic != LWS_PLUGIN_API_MAGIC) {
-		lwsl_err("Plugin API %d, library API %d", LWS_PLUGIN_API_MAGIC,
-			 c->api_magic);
-		return 1;
-	}
-
-	c->protocols = protocols;
-	c->count_protocols = LWS_ARRAY_SIZE(protocols);
-	c->extensions = NULL;
-	c->count_extensions = 0;
-
-	return 0;
-}
-
-LWS_EXTERN LWS_VISIBLE int
-destroy_protocol_minimal(struct lws_context *context)
-{
-	return 0;
-}
-#endif

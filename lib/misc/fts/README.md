@@ -19,8 +19,7 @@ around structures in the on-disk index file.
 
 Function|Related Link
 ---|---
-Public API|[include/libwebsockets/lws-fts.h](
-https://libwebsockets.org/git/libwebsockets/tree/include/libwebsockets/lws-fts.h)
+Public API|[include/libwebsockets/lws-fts.h](https://libwebsockets.org/git/libwebsockets/tree/include/libwebsockets/lws-fts.h)
 CI test app|[minimal-examples/api-tests/api-test-fts](https://libwebsockets.org/git/libwebsockets/tree/minimal-examples/api-tests/api-test-fts)
 Demo minimal example|[minimal-examples/http-server/minimal-http-server-fulltext-search](https://libwebsockets.org/git/libwebsockets/tree/minimal-examples/http-server/minimal-http-server-fulltext-search)
 Live Demo|[https://libwebsockets.org/ftsdemo/](https://libwebsockets.org/ftsdemo/)
@@ -113,7 +112,7 @@ more or less bytes according to the value.  So the peak memory requirements for
 large tries are much bigger than the size of the serialized trie file that is
 output.
 
-For the linux kernel at 4.14 and default indexing whitelist on a 2.8GHz AMD
+For the linux kernel at 4.14 and default indexing list on a 2.8GHz AMD
 threadripper (using one thread), the stats are:
 
 Name|Value
@@ -125,7 +124,7 @@ Peak alloc|78MiB
 Serialization time|202ms
 Trie File size|347MiB
 
-To index libwebsockets master under the same conditions:
+To index libwebsockets main branch under the same conditions:
 
 Name|Value
 ---|---
@@ -135,9 +134,7 @@ Indexing time|123ms
 Peak alloc|3MiB
 Serialization time|1ms
 Trie File size|1.4MiB
- 
-So the peak memory requirement to generate the whole trie in memory for that
-first is around 4x the size of the final output file.
+
 
 Once it's generated, querying the trie file is very inexpensive, even when there
 are lots of results.

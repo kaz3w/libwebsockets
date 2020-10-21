@@ -1,24 +1,25 @@
 /*
  * libwebsockets - small server side websockets and web server implementation
  *
- * Copyright (C) 2010-2018 Andy Green <andy@warmcat.com>
+ * Copyright (C) 2010 - 2019 Andy Green <andy@warmcat.com>
  *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation:
- *  version 2.1 of the License.
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
- *  MA  02110-1301  USA
- *
- * included from libwebsockets.h
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
  */
 
 /** \defgroup lejp JSON parser
@@ -106,7 +107,7 @@ enum lejp_callbacks {
 	LEJPCB_ARRAY_END	= 15,
 
 	LEJPCB_OBJECT_START	= 16,
-	LEJPCB_OBJECT_END	= 17
+	LEJPCB_OBJECT_END	= 17,
 };
 
 /**
@@ -152,11 +153,12 @@ enum lejp_callbacks {
  *
  *  LEJPCB_VAL_STR_START: We are starting to parse a string, no data yet
  *
- *  LEJPCB_VAL_STR_CHUNK: We parsed LEJP_STRING_CHUNK -1 bytes of string data in
- *			ctx->buf, which is as much as we can buffer, so we are
- *			spilling it.  If all your strings are less than
- *			LEJP_STRING_CHUNK - 1 bytes, you will never see this
- *			callback.
+ *  LEJPCB_VAL_STR_CHUNK: We filled the string buffer in the ctx, but it's not
+ *			  the end of the string.  We produce this to spill the
+ *			  intermediate buffer to the user code, so we can handle
+ *			  huge JSON strings using only the small buffer in the
+ *			  ctx.  If the whole JSON string fits in the ctx buffer,
+ *			  you won't get these callbacks.
  *
  *  LEJPCB_VAL_STR_END:	String parsing has completed, the last chunk of the
  *			string is in ctx->buf.
@@ -173,11 +175,14 @@ LWS_EXTERN signed char _lejp_callback(struct lejp_ctx *ctx, char reason);
 
 typedef signed char (*lejp_callback)(struct lejp_ctx *ctx, char reason);
 
+#ifndef LEJP_MAX_PARSING_STACK_DEPTH
+#define LEJP_MAX_PARSING_STACK_DEPTH 5
+#endif
 #ifndef LEJP_MAX_DEPTH
 #define LEJP_MAX_DEPTH 12
 #endif
 #ifndef LEJP_MAX_INDEX_DEPTH
-#define LEJP_MAX_INDEX_DEPTH 5
+#define LEJP_MAX_INDEX_DEPTH 6
 #endif
 #ifndef LEJP_MAX_PATH
 #define LEJP_MAX_PATH 128
@@ -201,24 +206,35 @@ struct _lejp_stack {
 	char b; /* user bitfield */
 };
 
+struct _lejp_parsing_stack {
+	void *user;	/* private to the stack level */
+	signed char (*callback)(struct lejp_ctx *ctx, char reason);
+	const char * const *paths;
+	uint8_t count_paths;
+	uint8_t ppos;
+	uint8_t path_match;
+};
+
 struct lejp_ctx {
 
 	/* sorted by type for most compact alignment
 	 *
 	 * pointers
 	 */
-
-	signed char (*callback)(struct lejp_ctx *ctx, char reason);
 	void *user;
-	const char * const *paths;
 
 	/* arrays */
 
+	struct _lejp_parsing_stack pst[LEJP_MAX_PARSING_STACK_DEPTH];
 	struct _lejp_stack st[LEJP_MAX_DEPTH];
 	uint16_t i[LEJP_MAX_INDEX_DEPTH]; /* index array */
 	uint16_t wild[LEJP_MAX_INDEX_DEPTH]; /* index array */
 	char path[LEJP_MAX_PATH];
 	char buf[LEJP_STRING_CHUNK + 1];
+
+	/* size_t */
+
+	size_t path_stride; /* 0 means default ptr size, else stride */
 
 	/* int */
 
@@ -235,11 +251,12 @@ struct lejp_ctx {
 	uint8_t f;
 	uint8_t sp; /* stack head */
 	uint8_t ipos; /* index stack depth */
-	uint8_t ppos;
 	uint8_t count_paths;
 	uint8_t path_match;
 	uint8_t path_match_len;
 	uint8_t wildcount;
+	uint8_t pst_sp; /* parsing stack head */
+	uint8_t outer_array;
 };
 
 LWS_VISIBLE LWS_EXTERN void
@@ -257,6 +274,28 @@ LWS_VISIBLE LWS_EXTERN void
 lejp_change_callback(struct lejp_ctx *ctx,
 		     signed char (*callback)(struct lejp_ctx *ctx, char reason));
 
+/*
+ * push the current paths / paths_count and lejp_cb to a stack in the ctx, and
+ * start using the new ones
+ */
+LWS_VISIBLE LWS_EXTERN int
+lejp_parser_push(struct lejp_ctx *ctx, void *user, const char * const *paths,
+		 unsigned char paths_count, lejp_callback lejp_cb);
+
+/*
+ * pop the previously used paths / paths_count and lejp_cb, and continue
+ * parsing using those as before
+ */
+LWS_VISIBLE LWS_EXTERN int
+lejp_parser_pop(struct lejp_ctx *ctx);
+
+/* exported for use when reevaluating a path for use with a subcontext */
+LWS_VISIBLE LWS_EXTERN void
+lejp_check_path_match(struct lejp_ctx *ctx);
+
 LWS_VISIBLE LWS_EXTERN int
 lejp_get_wildcard(struct lejp_ctx *ctx, int wildcard, char *dest, int len);
+
+LWS_VISIBLE LWS_EXTERN const char *
+lejp_error_to_string(int e);
 //@}

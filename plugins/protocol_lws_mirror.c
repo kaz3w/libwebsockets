@@ -1,7 +1,7 @@
 /*
  * libwebsockets-test-server - libwebsockets test implementation
  *
- * Copyright (C) 2010-2017 Andy Green <andy@warmcat.com>
+ * Written in 2010-2019 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -196,16 +196,25 @@ callback_lws_mirror(struct lws *wsi, enum lws_callback_reasons reason,
 			(struct per_vhost_data__lws_mirror *)
 			lws_protocol_vh_priv_get(lws_get_vhost(wsi),
 						 lws_get_protocol(wsi));
+	char name[300], update_worst, sent_something, *pn = name;
 	struct mirror_instance *mi = NULL;
 	const struct a_message *msg;
 	struct a_message amsg;
-	char name[300], update_worst, sent_something, *pn = name;
 	uint32_t oldest_tail;
 	int n, count_mi = 0;
 
 	switch (reason) {
 	case LWS_CALLBACK_ESTABLISHED:
 		lwsl_info("%s: LWS_CALLBACK_ESTABLISHED\n", __func__);
+		if (!v) {
+			lws_protocol_vh_priv_zalloc(lws_get_vhost(wsi),
+					lws_get_protocol(wsi),
+					sizeof(struct per_vhost_data__lws_mirror));
+			v = (struct per_vhost_data__lws_mirror *)
+					lws_protocol_vh_priv_get(lws_get_vhost(wsi),
+								 lws_get_protocol(wsi));
+			lws_pthread_mutex_init(&v->lock);
+		}
 
 		/*
 		 * mirror instance name... defaults to "", but if URL includes
@@ -218,7 +227,7 @@ callback_lws_mirror(struct lws *wsi, enum lws_callback_reasons reason,
 		if (strchr(name, '='))
 			pn = strchr(name, '=') + 1;
 
-		lwsl_notice("%s: mirror name '%s'\n", __func__, pn);
+		//lwsl_notice("%s: mirror name '%s'\n", __func__, pn);
 
 		/* is there already a mirror instance of this name? */
 
@@ -229,7 +238,6 @@ callback_lws_mirror(struct lws *wsi, enum lws_callback_reasons reason,
 			count_mi++;
 			if (!strcmp(pn, mi1->name)) {
 				/* yes... we will join it */
-				lwsl_notice("Joining existing mi %p '%s'\n", mi1, pn);
 				mi = mi1;
 				break;
 			}
@@ -239,7 +247,7 @@ callback_lws_mirror(struct lws *wsi, enum lws_callback_reasons reason,
 
 			/* no existing mirror instance for name */
 			if (count_mi == MAX_MIRROR_INSTANCES) {
-				lws_pthread_mutex_unlock(&v->lock); /* } vhost lock */
+				lws_pthread_mutex_unlock(&v->lock); /* } vh lock */
 				return -1;
 			}
 
@@ -333,13 +341,15 @@ bail1:
 		return 1; /* disallow compression */
 
 	case LWS_CALLBACK_PROTOCOL_INIT: /* per vhost */
-		lws_protocol_vh_priv_zalloc(lws_get_vhost(wsi),
+		if (!v) {
+			lws_protocol_vh_priv_zalloc(lws_get_vhost(wsi),
 				lws_get_protocol(wsi),
 				sizeof(struct per_vhost_data__lws_mirror));
-		v = (struct per_vhost_data__lws_mirror *)
+			v = (struct per_vhost_data__lws_mirror *)
 				lws_protocol_vh_priv_get(lws_get_vhost(wsi),
 							 lws_get_protocol(wsi));
-		lws_pthread_mutex_init(&v->lock);
+			lws_pthread_mutex_init(&v->lock);
+		}
 		break;
 
 	case LWS_CALLBACK_PROTOCOL_DESTROY:
@@ -436,7 +446,8 @@ bail2:
 		}
 
 		if (pss->mi->rx_enabled &&
-		    lws_ring_get_count_free_elements(pss->mi->ring) < RXFLOW_MIN)
+		    lws_ring_get_count_free_elements(pss->mi->ring) <
+								    RXFLOW_MIN)
 			__mirror_rxflow_instance(pss->mi, 0);
 
 req_writable:
@@ -471,27 +482,17 @@ static const struct lws_protocols protocols[] = {
 	LWS_PLUGIN_PROTOCOL_MIRROR
 };
 
-LWS_EXTERN LWS_VISIBLE int
-init_protocol_lws_mirror(struct lws_context *context,
-			     struct lws_plugin_capability *c)
-{
-	if (c->api_magic != LWS_PLUGIN_API_MAGIC) {
-		lwsl_err("Plugin API %d, library API %d", LWS_PLUGIN_API_MAGIC,
-			 c->api_magic);
-		return 1;
-	}
+LWS_VISIBLE const lws_plugin_protocol_t lws_mirror = {
+	.hdr = {
+		"lws mirror",
+		"lws_protocol_plugin",
+		LWS_PLUGIN_API_MAGIC
+	},
 
-	c->protocols = protocols;
-	c->count_protocols = LWS_ARRAY_SIZE(protocols);
-	c->extensions = NULL;
-	c->count_extensions = 0;
+	.protocols = protocols,
+	.count_protocols = LWS_ARRAY_SIZE(protocols),
+	.extensions = NULL,
+	.count_extensions = 0,
+};
 
-	return 0;
-}
-
-LWS_EXTERN LWS_VISIBLE int
-destroy_protocol_lws_mirror(struct lws_context *context)
-{
-	return 0;
-}
 #endif

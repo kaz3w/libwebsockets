@@ -1,7 +1,7 @@
 /*
  * libwebsockets-test-server - libwebsockets test implementation
  *
- * Copyright (C) 2010-2017 Andy Green <andy@warmcat.com>
+ * Written in 2010-2019 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -21,14 +21,21 @@
 #include <libwebsockets.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(LWS_HAS_GETOPT_LONG) || defined(WIN32)
 #include <getopt.h>
+#endif
 #include <signal.h>
+
+#if defined(WIN32) || defined(_WIN32)
+#else
+#include <unistd.h>
+#endif
 
 int close_testing;
 int max_poll_elements;
-int debug_level = 7;
+int debug_level = LLL_USER | 7;
 
-#ifdef EXTERNAL_POLL
+#if defined(LWS_WITH_EXTERNAL_POLL)
 struct lws_pollfd *pollfds;
 int *fd_lookup;
 int count_pollfds;
@@ -48,26 +55,7 @@ char crl_path[1024] = "";
 
 /*
  * This demonstrates how to use the clean protocol service separation of
- * plugins, but with static inclusion instead of runtime dynamic loading
- * (which requires libuv).
- *
- * dumb-increment doesn't use the plugin, both to demonstrate how to
- * do the protocols directly, and because it wants libuv for a timer.
- *
- * Please consider using test-server-v2.0.c instead of this: it has the
- * same functionality but
- *
- * 1) uses lws built-in http handling so you don't need to deal with it in
- * your callback
- *
- * 2) Links with libuv and uses the plugins at runtime
- *
- * 3) Uses advanced lws features like mounts to bind parts of the filesystem
- * to the served URL space
- *
- * Another option is lwsws, this operates like test-server-v2,0.c but is
- * configured using JSON, do you do not need to provide any code for the
- * serving action at all, just implement your protocols in plugins.
+ * plugins, in this case by statically including them at build-time.
  */
 
 #define LWS_PLUGIN_STATIC
@@ -75,7 +63,21 @@ char crl_path[1024] = "";
 #include "../plugins/protocol_lws_mirror.c"
 #include "../plugins/protocol_lws_status.c"
 #include "../plugins/protocol_dumb_increment.c"
+#endif
 #include "../plugins/protocol_post_demo.c"
+
+#if defined(LWS_WITH_EXTERNAL_POLL)
+static struct lws_pollfd *
+ext_find_fd(lws_sockfd_type fd)
+{
+	int n;
+
+	for (n = 0; n < max_poll_elements; n++)
+		if (pollfds[n].fd == fd)
+			return &pollfds[n];
+
+	return NULL;
+}
 #endif
 
 static int
@@ -83,10 +85,52 @@ lws_callback_http(struct lws *wsi, enum lws_callback_reasons reason, void *user,
 		  void *in, size_t len)
 {
 	const unsigned char *c;
+#if defined(LWS_WITH_EXTERNAL_POLL)
+	struct lws_pollargs *pa;
+	struct lws_pollfd *pfd;
+#endif
 	char buf[1024];
 	int n = 0, hlen;
 
 	switch (reason) {
+#if defined(LWS_WITH_EXTERNAL_POLL)
+	case LWS_CALLBACK_ADD_POLL_FD:
+		pa = (struct lws_pollargs *)in;
+		lwsl_debug("%s: ADD fd %d, ev %d\n", __func__, pa->fd, pa->events);
+		pfd = ext_find_fd(pa->fd);
+		if (pfd) {
+			lwsl_notice("%s: ADD fd %d already in ext table\n",
+					__func__, pa->fd);
+		} else {
+			pfd = ext_find_fd(LWS_SOCK_INVALID);
+			if (!pfd)
+				return -1;
+		}
+		pfd->fd = pa->fd;
+		pfd->events = pa->events;
+		pfd->revents = 0;
+		/* high water mark... */
+		count_pollfds = (pfd - pollfds) + 1;
+		break;
+	case LWS_CALLBACK_DEL_POLL_FD:
+		pa = (struct lws_pollargs *)in;
+		lwsl_debug("%s: DEL fd %d\n", __func__, pa->fd);
+		pfd = ext_find_fd(pa->fd);
+		if (!pfd)
+			return -1;
+		pfd->fd = LWS_SOCK_INVALID;
+		break;
+	case LWS_CALLBACK_CHANGE_MODE_POLL_FD:
+		pa = (struct lws_pollargs *)in;
+		lwsl_debug("%s: CH fd %d\n", __func__, pa->fd);
+		pfd = ext_find_fd(pa->fd);
+		if (!pfd) {
+			lwsl_err("%s: unknown fd %d\n", __func__, pa->fd);
+			return -1;
+		}
+		pfd->events = pa->events;
+		break;
+#endif
 	case LWS_CALLBACK_HTTP:
 
 		/* non-mount-handled accesses will turn up here */
@@ -148,8 +192,8 @@ static struct lws_protocols protocols[] = {
 	LWS_PLUGIN_PROTOCOL_DUMB_INCREMENT,
 	LWS_PLUGIN_PROTOCOL_MIRROR,
 	LWS_PLUGIN_PROTOCOL_LWS_STATUS,
-	LWS_PLUGIN_PROTOCOL_POST_DEMO,
 #endif
+	LWS_PLUGIN_PROTOCOL_POST_DEMO,
 	{ NULL, NULL, 0, 0 } /* terminator */
 };
 
@@ -199,6 +243,7 @@ void sighandler(int sig)
 	lws_cancel_service(context);
 }
 
+#if defined(LWS_ROLE_WS) && !defined(LWS_WITHOUT_EXTENSIONS)
 static const struct lws_extension exts[] = {
 	{
 		"permessage-deflate",
@@ -207,6 +252,7 @@ static const struct lws_extension exts[] = {
 	},
 	{ NULL, NULL, NULL /* terminator */ }
 };
+#endif
 
 /*
  * mount handlers for sections of the URL space
@@ -298,6 +344,7 @@ static const struct lws_protocol_vhost_options pvo = {
 	""				/* ignored */
 };
 
+#if defined(LWS_HAS_GETOPT_LONG) || defined(WIN32)
 static struct option options[] = {
 	{ "help",	no_argument,		NULL, 'h' },
 	{ "debug",	required_argument,	NULL, 'd' },
@@ -309,6 +356,7 @@ static struct option options[] = {
 	{ "ssl-cert",  required_argument,	NULL, 'C' },
 	{ "ssl-key",  required_argument,	NULL, 'K' },
 	{ "ssl-ca",  required_argument,		NULL, 'A' },
+	{ "resource-path",  required_argument,		NULL, 'r' },
 #if defined(LWS_WITH_TLS)
 	{ "ssl-verify-client",	no_argument,		NULL, 'v' },
 #if defined(LWS_HAVE_SSL_CTX_set1_param)
@@ -320,25 +368,28 @@ static struct option options[] = {
 #ifndef LWS_NO_DAEMONIZE
 	{ "daemonize",	no_argument,		NULL, 'D' },
 #endif
-	{ "pingpong-secs", required_argument,	NULL, 'P' },
+	{ "ignore-sigterm", no_argument,	NULL, 'I' },
+
 	{ NULL, 0, 0, 0 }
 };
+#endif
+
+static void
+sigterm_catch(int sig)
+{
+}
 
 int main(int argc, char **argv)
 {
 	struct lws_context_creation_info info;
 	struct lws_vhost *vhost;
 	char interface_name[128] = "";
-#ifdef EXTERNAL_POLL
-	unsigned int ms;
-#endif
 	const char *iface = NULL;
 	char cert_path[1024] = "";
 	char key_path[1024] = "";
 	char ca_path[1024] = "";
 	int uid = -1, gid = -1;
 	int use_ssl = 0;
-	int pp_secs = 0;
 	int opts = 0;
 	int n = 0;
 #ifndef LWS_NO_DAEMONIZE
@@ -353,7 +404,11 @@ int main(int argc, char **argv)
 	info.port = 7681;
 
 	while (n >= 0) {
-		n = getopt_long(argc, argv, "eci:hsap:d:DC:K:A:R:vu:g:P:kU:n", options, NULL);
+#if defined(LWS_HAS_GETOPT_LONG) || defined(WIN32)
+		n = getopt_long(argc, argv, "eci:hsap:d:DC:K:A:R:vu:g:kU:niIr:", options, NULL);
+#else
+		n = getopt(argc, argv, "eci:hsap:d:DC:K:A:R:vu:g:kU:nIr:");
+#endif
 		if (n < 0)
 			continue;
 		switch (n) {
@@ -363,9 +418,6 @@ int main(int argc, char **argv)
 #ifndef LWS_NO_DAEMONIZE
 		case 'D':
 			daemonize = 1;
-			#if !defined(_WIN32) && !defined(__sun)
-			syslog_options &= ~LOG_PERROR;
-			#endif
 			break;
 #endif
 		case 'u':
@@ -380,6 +432,12 @@ int main(int argc, char **argv)
 		case 'n':
 			/* no dumb increment send */
 			test_options |= 1;
+			break;
+		case 'I':
+			signal(SIGTERM, sigterm_catch);
+			break;
+		case 'r':
+			resource_path = optarg;
 			break;
 		case 's':
 			use_ssl = 1;
@@ -421,10 +479,6 @@ int main(int argc, char **argv)
 			break;
 		case 'A':
 			lws_strncpy(ca_path, optarg, sizeof(ca_path));
-			break;
-		case 'P':
-			pp_secs = atoi(optarg);
-			lwsl_notice("Setting pingpong interval to %d\n", pp_secs);
 			break;
 #if defined(LWS_WITH_TLS)
 		case 'v':
@@ -468,25 +522,33 @@ int main(int argc, char **argv)
 	/* tell the library what debug level to emit and to send it to stderr */
 	lws_set_log_level(debug_level, NULL);
 
-	lwsl_notice("libwebsockets test server - license LGPL2.1+SLE\n");
+	lwsl_notice("libwebsockets test server - license MIT\n");
 	lwsl_notice("(C) Copyright 2010-2018 Andy Green <andy@warmcat.com>\n");
 
 	printf("Using resource path \"%s\"\n", resource_path);
-#ifdef EXTERNAL_POLL
+#if defined(LWS_WITH_EXTERNAL_POLL)
+#if !defined(WIN32) && !defined(_WIN32) && !defined(__ANDROID__)
 	max_poll_elements = getdtablesize();
+#else
+	max_poll_elements = sysconf(_SC_OPEN_MAX);
+#endif
 	pollfds = malloc(max_poll_elements * sizeof (struct lws_pollfd));
 	fd_lookup = malloc(max_poll_elements * sizeof (int));
 	if (pollfds == NULL || fd_lookup == NULL) {
 		lwsl_err("Out of memory pollfds=%d\n", max_poll_elements);
 		return -1;
 	}
+	for (n = 0; n < max_poll_elements; n++)
+		pollfds[n].fd = LWS_SOCK_INVALID;
+	count_pollfds = 0;
 #endif
 
 	info.iface = iface;
 	info.protocols = protocols;
+
+#if defined(LWS_WITH_TLS)
 	info.ssl_cert_filepath = NULL;
 	info.ssl_private_key_filepath = NULL;
-	info.ws_ping_pong_interval = pp_secs;
 
 	if (use_ssl) {
 		if (strlen(resource_path) > sizeof(cert_path) - 32) {
@@ -503,17 +565,22 @@ int main(int argc, char **argv)
 		if (!key_path[0])
 			sprintf(key_path, "%s/libwebsockets-test-server.key.pem",
 								resource_path);
-
+#if defined(LWS_WITH_TLS)
 		info.ssl_cert_filepath = cert_path;
 		info.ssl_private_key_filepath = key_path;
 		if (ca_path[0])
 			info.ssl_ca_filepath = ca_path;
+#endif
 	}
+#endif
 	info.gid = gid;
 	info.uid = uid;
 	info.options = opts | LWS_SERVER_OPTION_VALIDATE_UTF8 | LWS_SERVER_OPTION_EXPLICIT_VHOSTS;
+#if defined(LWS_ROLE_WS) && !defined(LWS_WITHOUT_EXTENSIONS)
 	info.extensions = exts;
+#endif
 	info.timeout_secs = 5;
+#if defined(LWS_WITH_TLS)
 	info.ssl_cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384:"
 			       "ECDHE-RSA-AES256-GCM-SHA384:"
 			       "DHE-RSA-AES256-GCM-SHA384:"
@@ -527,9 +594,12 @@ int main(int argc, char **argv)
 			       "!DHE-RSA-AES256-SHA256:"
 			       "!AES256-GCM-SHA384:"
 			       "!AES256-SHA256";
+#endif
 	info.mounts = &mount;
-	info.ip_limit_ah = 24; /* for testing */
-	info.ip_limit_wsi = 105; /* for testing */
+#if defined(LWS_WITH_PEER_LIMITS)
+	info.ip_limit_ah = 128; /* for testing */
+	info.ip_limit_wsi = 800; /* for testing */
+#endif
 
 	if (use_ssl)
 		/* redirect guys coming on http */
@@ -557,7 +627,7 @@ int main(int argc, char **argv)
 
 	info.port++;
 
-#if !defined(LWS_NO_CLIENT) && defined(LWS_WITH_TLS)
+#if defined(LWS_WITH_CLIENT) && defined(LWS_WITH_TLS)
 	lws_init_vhost_client_ssl(&info, vhost);
 #endif
 
@@ -571,9 +641,6 @@ int main(int argc, char **argv)
 	lws_get_fops(context)->open = test_server_fops_open;
 
 	n = 0;
-#ifdef EXTERNAL_POLL
-	int ms_1sec = 0;
-#endif
 	while (n >= 0 && !force_exit) {
 		struct timeval tv;
 
@@ -585,13 +652,16 @@ int main(int argc, char **argv)
 		 * as soon as it can take more packets (usually immediately)
 		 */
 
-#ifdef EXTERNAL_POLL
+#if defined(LWS_WITH_EXTERNAL_POLL)
 		/*
 		 * this represents an existing server's single poll action
 		 * which also includes libwebsocket sockets
 		 */
-		ms = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-		n = poll(pollfds, count_pollfds, 50);
+
+		/* if needed, force-service wsis that may not have read all input */
+		n = lws_service_adjust_timeout(context, 5000, 0);
+
+		n = poll(pollfds, count_pollfds, n);
 		if (n < 0)
 			continue;
 
@@ -604,33 +674,19 @@ int main(int argc, char **argv)
 					* control
 					*/
 					if (lws_service_fd(context,
-								  &pollfds[n]) < 0)
+							   &pollfds[n]) < 0)
 						goto done;
-
-			/* if needed, force-service wsis that may not have read all input */
-			while (!lws_service_adjust_timeout(context, 1, 0)) {
-				lwsl_notice("extpoll doing forced service!\n");
-				lws_service_tsi(context, -1, 0);
-			}
-		} else {
-			/* no revents, but before polling again, make lws check for any timeouts */
-			if (ms - ms_1sec > 1000) {
-				lwsl_notice("1 per sec\n");
-				lws_service_fd(context, NULL);
-				ms_1sec = ms;
-			}
 		}
+
+		lws_service_tsi(context, -1, 0);
 #else
 		/*
 		 * If libwebsockets sockets are all we care about,
 		 * you can use this api which takes care of the poll()
 		 * and looping through finding who needed service.
-		 *
-		 * If no socket needs service, it'll return anyway after
-		 * the number of ms in the second argument.
 		 */
 
-		n = lws_service(context, 50);
+		n = lws_service(context, 0);
 #endif
 
 		if (dynamic_vhost_enable && !dynamic_vhost) {
@@ -645,7 +701,7 @@ int main(int argc, char **argv)
 
 	}
 
-#ifdef EXTERNAL_POLL
+#if defined(LWS_WITH_EXTERNAL_POLL)
 done:
 #endif
 

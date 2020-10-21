@@ -1,7 +1,7 @@
 /*
  * ws protocol handler plugin for "lws-minimal-pmd-bulk"
  *
- * Copyright (C) 2010-2018 Andy Green <andy@warmcat.com>
+ * Written in 2010-2019 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -147,21 +147,21 @@ callback_minimal_pmd_bulk(struct lws *wsi, enum lws_callback_reasons reason,
 				if (s > (size_t)n)
 					s = n;
 				memcpy(p, &redundant_string[m], s);
-				pss->position_tx += s;
+				pss->position_tx += (int)s;
 				p += s;
-				n -= s;
+				n -= (int)s;
 			}
 		} else {
 			pss->position_tx += n;
 			while (n--)
-				*p++ = rng(&pss->rng_tx);
+				*p++ = (uint8_t)rng(&pss->rng_tx);
 		}
 
 		n = lws_ptr_diff(p, start);
 		m = lws_write(wsi, start, n, flags);
 		lwsl_user("LWS_CALLBACK_SERVER_WRITEABLE: wrote %d\n", n);
 		if (m < n) {
-			lwsl_err("ERROR %d writing ws\n", n);
+			lwsl_err("ERROR %d / %d writing ws\n", m, n);
 			return -1;
 		}
 		if (pss->position_tx != MESSAGE_SIZE) /* if more to do... */
@@ -172,7 +172,7 @@ callback_minimal_pmd_bulk(struct lws *wsi, enum lws_callback_reasons reason,
 		lwsl_user("LWS_CALLBACK_RECEIVE: %4d (pss->pos=%d, rpp %5d, last %d)\n",
 				(int)len, (int)pss->position_rx, (int)lws_remaining_packet_payload(wsi),
 				lws_is_final_fragment(wsi));
-		olen = len;
+		olen = (int)len;
 
 		if (*vhd->options & 1) {
 			while (len) {
@@ -185,13 +185,13 @@ callback_minimal_pmd_bulk(struct lws *wsi, enum lws_callback_reasons reason,
 					lwsl_user("echo'd data doesn't match\n");
 					return -1;
 				}
-				pss->position_rx += s;
+				pss->position_rx += (int)s;
 				in = ((char *)in) + s;
 				len -= s;
 			}
 		} else {
 			p = (uint8_t *)in;
-			pss->position_rx += len;
+			pss->position_rx += (int)len;
 			while (len--) {
 				if (*p++ != (uint8_t)rng(&pss->rng_rx)) {
 					lwsl_user("echo'd data doesn't match: 0x%02X 0x%02X (%d)\n",
@@ -221,36 +221,3 @@ callback_minimal_pmd_bulk(struct lws *wsi, enum lws_callback_reasons reason,
 		4096, \
 		0, NULL, 0 \
 	}
-
-#if !defined (LWS_PLUGIN_STATIC)
-
-/* boilerplate needed if we are built as a dynamic plugin */
-
-static const struct lws_protocols protocols[] = {
-	LWS_PLUGIN_PROTOCOL_MINIMAL_PMD_BULK
-};
-
-LWS_EXTERN LWS_VISIBLE int
-init_protocol_minimal_pmd_bulk(struct lws_context *context,
-			       struct lws_plugin_capability *c)
-{
-	if (c->api_magic != LWS_PLUGIN_API_MAGIC) {
-		lwsl_err("Plugin API %d, library API %d", LWS_PLUGIN_API_MAGIC,
-			 c->api_magic);
-		return 1;
-	}
-
-	c->protocols = protocols;
-	c->count_protocols = LWS_ARRAY_SIZE(protocols);
-	c->extensions = NULL;
-	c->count_extensions = 0;
-
-	return 0;
-}
-
-LWS_EXTERN LWS_VISIBLE int
-destroy_protocol_minimal_pmd_bulk(struct lws_context *context)
-{
-	return 0;
-}
-#endif

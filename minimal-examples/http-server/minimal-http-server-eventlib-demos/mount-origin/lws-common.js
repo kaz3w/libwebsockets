@@ -110,6 +110,11 @@ function lws_gray_out(vis, _options) {
 /*
  * end of grayOut related stuff
  */
+
+function new_ws(urlpath, protocol)
+{
+	return new WebSocket(urlpath, protocol);
+}
  
 function lws_san(s)
 {

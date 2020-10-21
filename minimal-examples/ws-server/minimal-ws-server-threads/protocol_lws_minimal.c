@@ -1,7 +1,7 @@
 /*
  * ws protocol handler plugin for "lws-minimal" demonstrating multithread
  *
- * Copyright (C) 2010-2018 Andy Green <andy@warmcat.com>
+ * Written in 2010-2019 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -51,6 +51,10 @@ struct per_vhost_data__minimal {
 	char finished;
 };
 
+#if defined(WIN32)
+static void usleep(unsigned long l) { Sleep(l / 1000); }
+#endif
+
 /*
  * This runs under both lws service and "spam threads" contexts.
  * Access is serialized by vhd->lock_ring.
@@ -79,7 +83,11 @@ thread_spam(void *d)
 	struct per_vhost_data__minimal *vhd =
 			(struct per_vhost_data__minimal *)d;
 	struct msg amsg;
-	int len = 128, index = 1, n;
+	int len = 128, index = 1, n, whoami = 0;
+
+	for (n = 0; n < (int)LWS_ARRAY_SIZE(vhd->pthread_spam); n++)
+		if (pthread_equal(pthread_self(), vhd->pthread_spam[n]))
+			whoami = n + 1;
 
 	do {
 		/* don't generate output if nobody connected */
@@ -101,8 +109,8 @@ thread_spam(void *d)
 			goto wait_unlock;
 		}
 		n = lws_snprintf((char *)amsg.payload + LWS_PRE, len,
-			         "%s: tid: %p, msg: %d", vhd->config,
-			         (void *)pthread_self(), index++);
+			         "%s: tid: %d, msg: %d", vhd->config,
+			         whoami, index++);
 		amsg.len = n;
 		n = lws_ring_insert(vhd->ring, &amsg, 1);
 		if (n != 1) {
@@ -123,9 +131,11 @@ wait:
 
 	} while (!vhd->finished);
 
-	lwsl_notice("thread_spam %p exiting\n", (void *)pthread_self());
+	lwsl_notice("thread_spam %d exiting\n", whoami);
 
 	pthread_exit(NULL);
+
+	return NULL;
 }
 
 /* this runs under the lws service thread context only */
@@ -254,6 +264,8 @@ init_fail:
 		break;
 
 	case LWS_CALLBACK_EVENT_WAIT_CANCELLED:
+		if (!vhd)
+			break;
 		/*
 		 * When the "spam" threads add a message to the ringbuffer,
 		 * they create this event in the lws service thread context
@@ -283,36 +295,3 @@ init_fail:
 		128, \
 		0, NULL, 0 \
 	}
-
-#if !defined (LWS_PLUGIN_STATIC)
-
-/* boilerplate needed if we are built as a dynamic plugin */
-
-static const struct lws_protocols protocols[] = {
-	LWS_PLUGIN_PROTOCOL_MINIMAL
-};
-
-LWS_EXTERN LWS_VISIBLE int
-init_protocol_minimal(struct lws_context *context,
-		      struct lws_plugin_capability *c)
-{
-	if (c->api_magic != LWS_PLUGIN_API_MAGIC) {
-		lwsl_err("Plugin API %d, library API %d", LWS_PLUGIN_API_MAGIC,
-			 c->api_magic);
-		return 1;
-	}
-
-	c->protocols = protocols;
-	c->count_protocols = LWS_ARRAY_SIZE(protocols);
-	c->extensions = NULL;
-	c->count_extensions = 0;
-
-	return 0;
-}
-
-LWS_EXTERN LWS_VISIBLE int
-destroy_protocol_minimal(struct lws_context *context)
-{
-	return 0;
-}
-#endif

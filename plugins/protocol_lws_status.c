@@ -1,7 +1,7 @@
 /*
  * libwebsockets-test-server - libwebsockets test implementation
  *
- * Copyright (C) 2010-2016 Andy Green <andy@warmcat.com>
+ * Written in 2010-2019 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -120,8 +120,10 @@ callback_lws_status(struct lws *wsi, enum lws_callback_reasons reason,
 		time(&pss->time_est);
 		pss->wsi = wsi;
 
+#if defined(LWS_WITH_HTTP_UNCOMMON_HEADERS)
 		if (lws_hdr_copy(wsi, pss->user_agent, sizeof(pss->user_agent),
 			     WSI_TOKEN_HTTP_USER_AGENT) < 0) /* too big */
+#endif
 			strcpy(pss->user_agent, "unknown");
 		trigger_resend(vhd);
 		break;
@@ -181,7 +183,7 @@ callback_lws_status(struct lws *wsi, enum lws_callback_reasons reason,
 		case WALK_FINAL:
 walk_final:
 			n = LWS_WRITE_CONTINUATION;
-			p += sprintf(p, "]}");
+			p += lws_snprintf(p, 4, "]}");
 			if (pss->changed_partway) {
 				pss->changed_partway = 0;
 				pss->subsequent = 0;
@@ -243,29 +245,17 @@ static const struct lws_protocols protocols[] = {
 	LWS_PLUGIN_PROTOCOL_LWS_STATUS
 };
 
+LWS_VISIBLE const lws_plugin_protocol_t lws_status = {
+	.hdr = {
+		"lws status",
+		"lws_protocol_plugin",
+		LWS_PLUGIN_API_MAGIC
+	},
 
-LWS_EXTERN LWS_VISIBLE int
-init_protocol_lws_status(struct lws_context *context,
-			     struct lws_plugin_capability *c)
-{
-	if (c->api_magic != LWS_PLUGIN_API_MAGIC) {
-		lwsl_err("Plugin API %d, library API %d", LWS_PLUGIN_API_MAGIC,
-			 c->api_magic);
-		return 1;
-	}
-
-	c->protocols = protocols;
-	c->count_protocols = LWS_ARRAY_SIZE(protocols);
-	c->extensions = NULL;
-	c->count_extensions = 0;
-
-	return 0;
-}
-
-LWS_EXTERN LWS_VISIBLE int
-destroy_protocol_lws_status(struct lws_context *context)
-{
-	return 0;
-}
+	.protocols = protocols,
+	.count_protocols = LWS_ARRAY_SIZE(protocols),
+	.extensions = NULL,
+	.count_extensions = 0,
+};
 
 #endif

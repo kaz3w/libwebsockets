@@ -1,7 +1,7 @@
 /*
  * lws-minimal-http-server-eventlib
  *
- * Copyright (C) 2018 Andy Green <andy@warmcat.com>
+ * Written in 2010-2019 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -83,12 +83,16 @@ int main(int argc, const char **argv)
 	info.error_document_404 = "/404.html";
 	info.pcontext = &context;
 	info.signal_cb = signal_cb;
+	info.options =
+		LWS_SERVER_OPTION_HTTP_HEADERS_SECURITY_BEST_PRACTICES_ENFORCE;
 
+#if defined(LWS_WITH_TLS)
 	if (lws_cmdline_option(argc, argv, "-s")) {
 		info.options |= LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 		info.ssl_cert_filepath = "localhost-100y.cert";
 		info.ssl_private_key_filepath = "localhost-100y.key";
 	}
+#endif
 
 	if (lws_cmdline_option(argc, argv, "--uv"))
 		info.options |= LWS_SERVER_OPTION_LIBUV;
@@ -99,7 +103,10 @@ int main(int argc, const char **argv)
 			if (lws_cmdline_option(argc, argv, "--ev"))
 				info.options |= LWS_SERVER_OPTION_LIBEV;
 			else
-				signal(SIGINT, sigint_handler);
+				if (lws_cmdline_option(argc, argv, "--glib"))
+					info.options |= LWS_SERVER_OPTION_GLIB;
+				else
+					signal(SIGINT, sigint_handler);
 
 	context = lws_create_context(&info);
 	if (!context) {

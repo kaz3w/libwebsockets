@@ -1,7 +1,7 @@
 /*
  * libwebsockets-test-client - libwebsockets test implementation
  *
- * Copyright (C) 2011-2017 Andy Green <andy@warmcat.com>
+ * Written in 2010-2019 by Andy Green <andy@warmcat.com>
  *
  * This file is made available under the Creative Commons CC0 1.0
  * Universal Public Domain Dedication.
@@ -22,7 +22,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(LWS_HAS_GETOPT_LONG) || defined(WIN32)
 #include <getopt.h>
+#endif
 #include <string.h>
 #include <signal.h>
 
@@ -277,13 +279,16 @@ callback_dumb_increment(struct lws *wsi, enum lws_callback_reasons reason,
 	case LWS_CALLBACK_OPENSSL_LOAD_EXTRA_CLIENT_VERIFY_CERTS:
 		if (crl_path[0]) {
 			/* Enable CRL checking of the server certificate */
+			X509_STORE *store;
+			X509_LOOKUP *lookup;
+			int n;
 			X509_VERIFY_PARAM *param = X509_VERIFY_PARAM_new();
 			X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_CRL_CHECK);
 			SSL_CTX_set1_param((SSL_CTX*)user, param);
-			X509_STORE *store = SSL_CTX_get_cert_store((SSL_CTX*)user);
-			X509_LOOKUP *lookup = X509_STORE_add_lookup(store,
+			store = SSL_CTX_get_cert_store((SSL_CTX*)user);
+			lookup = X509_STORE_add_lookup(store,
 							X509_LOOKUP_file());
-			int n = X509_load_cert_crl_file(lookup, crl_path,
+			n = X509_load_cert_crl_file(lookup, crl_path,
 							X509_FILETYPE_PEM);
 			X509_VERIFY_PARAM_free(param);
 			if (n != 1) {
@@ -505,6 +510,7 @@ static const struct lws_protocols protocols[] = {
 	{ NULL, NULL, 0, 0 } /* end */
 };
 
+#if defined(LWS_ROLE_WS) && !defined(LWS_WITHOUT_EXTENSIONS)
 static const struct lws_extension exts[] = {
 	{
 		"permessage-deflate",
@@ -518,7 +524,7 @@ static const struct lws_extension exts[] = {
 	},
 	{ NULL, NULL, NULL /* terminator */ }
 };
-
+#endif
 
 
 void sighandler(int sig)
@@ -526,6 +532,7 @@ void sighandler(int sig)
 	force_exit = 1;
 }
 
+#if defined(LWS_HAS_GETOPT_LONG) || defined(WIN32)
 static struct option options[] = {
 	{ "help",	no_argument,		NULL, 'h' },
 	{ "debug",      required_argument,      NULL, 'd' },
@@ -541,7 +548,6 @@ static struct option options[] = {
 	{ "longlived",	no_argument,		NULL, 'l' },
 	{ "post",	no_argument,		NULL, 'o' },
 	{ "once",	no_argument,		NULL, 'O' },
-	{ "pingpong-secs", required_argument,	NULL, 'P' },
 	{ "ssl-cert",  required_argument,	NULL, 'C' },
 	{ "ssl-key",  required_argument,	NULL, 'K' },
 	{ "ssl-ca",  required_argument,		NULL, 'A' },
@@ -550,6 +556,7 @@ static struct option options[] = {
 #endif
 	{ NULL, 0, 0, 0 }
 };
+#endif
 
 static int ratelimit_connects(unsigned int *last, unsigned int secs)
 {
@@ -568,8 +575,7 @@ static int ratelimit_connects(unsigned int *last, unsigned int secs)
 int main(int argc, char **argv)
 {
 	int n = 0, m, ret = 0, port = 7681, use_ssl = 0, ietf_version = -1;
-	unsigned int rl_dumb = 0, rl_mirror = 0, do_ws = 1, pp_secs = 0,
-		     do_multi = 0;
+	unsigned int rl_dumb = 0, rl_mirror = 0, do_ws = 1, do_multi = 0;
 	struct lws_context_creation_info info;
 	struct lws_client_connect_info i;
 	struct lws_context *context;
@@ -582,15 +588,18 @@ int main(int argc, char **argv)
 
 	memset(&info, 0, sizeof info);
 
-	lwsl_notice("libwebsockets test client - license LGPL2.1+SLE\n");
+	lwsl_notice("libwebsockets test client - license MIT\n");
 	lwsl_notice("(C) Copyright 2010-2018 Andy Green <andy@warmcat.com>\n");
 
 	if (argc < 2)
 		goto usage;
 
 	while (n >= 0) {
-		n = getopt_long(argc, argv, "Sjnuv:hsp:d:lC:K:A:P:moeO", options,
-				NULL);
+#if defined(LWS_HAS_GETOPT_LONG) || defined(WIN32)
+       n = getopt_long(argc, argv, "Sjnuv:hsp:d:lC:K:A:moeO", options, NULL);
+#else
+       n = getopt(argc, argv, "Sjnuv:hsp:d:lC:K:A:moeO");
+#endif
 		if (n < 0)
 			continue;
 		switch (n) {
@@ -610,10 +619,6 @@ int main(int argc, char **argv)
 			break;
 		case 'e':
 			flag_echo = 1;
-			break;
-		case 'P':
-			pp_secs = atoi(optarg);
-			lwsl_notice("Setting pingpong interval to %d\n", pp_secs);
 			break;
 		case 'j':
 			justmirror = 1;
@@ -699,13 +704,24 @@ int main(int argc, char **argv)
 	info.protocols = protocols;
 	info.gid = -1;
 	info.uid = -1;
-	info.ws_ping_pong_interval = pp_secs;
+#if defined(LWS_ROLE_WS) && !defined(LWS_WITHOUT_EXTENSIONS)
 	info.extensions = exts;
+#endif
+
+	/*
+	 * since we know this lws context is only ever going to be used with
+	 * a few client wsis / fds / sockets at a time, let lws know it doesn't
+	 * have to use the default allocations for fd tables up to ulimit -n.
+	 * It will just allocate for 2 internal and 4 that we might use.
+	 */
+	info.fd_limit_per_thread = 2 + 4;
 
 #if defined(LWS_WITH_TLS)
 	info.options |= LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 #endif
 
+	info.options |= LWS_SERVER_OPTION_H2_JUST_FIX_WINDOW_UPDATE_OVERFLOW;
+#if defined(LWS_WITH_TLS)
 	if (use_ssl) {
 		/*
 		 * If the server wants us to present a valid SSL client certificate
@@ -746,7 +762,7 @@ int main(int argc, char **argv)
 		lwsl_notice(" Skipping peer cert hostname check\n");
 	else
 		lwsl_notice(" Requiring peer cert hostname matches\n");
-
+#endif
 	context = lws_create_context(&info);
 	if (context == NULL) {
 		fprintf(stderr, "Creating libwebsocket context failed\n");

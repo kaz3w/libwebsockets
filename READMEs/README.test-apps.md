@@ -24,7 +24,7 @@ lwsws.
 NOTE this method implies libuv is used by lws, to provide crossplatform
 implementations of timers, dynamic lib loading etc for plugins and lwsws.
 
-2) test-server-v2.0.c
+2) Using plugins in code
 
 This method lets you configure web serving in code, instead of using lwsws.
 
@@ -34,7 +34,7 @@ loaded.
 
  $ cmake .. -DLWS_WITH_PLUGINS=1
 
-See [test-server-v2.0.c](../test-apps/test-server-v2.0.c)
+See, eg, the [test-server](../test-apps/test-server.c)
 
 3) protocols in the server app
 
@@ -81,7 +81,7 @@ background and return immediately.  In this daemonized mode all stderr is
 disabled and logging goes only to syslog, eg, `/var/log/messages` or similar.
 
 The server maintains a lockfile at `/tmp/.lwsts-lock` that contains the pid
-of the master process, and deletes this file when the master process
+of the parent process, and deletes this file when the parent process
 terminates.
 
 To stop the daemon, do
@@ -302,7 +302,7 @@ By default it runs in server mode
 ```
 	$ libwebsockets-test-fraggle
 	libwebsockets test fraggle
-	(C) Copyright 2010-2011 Andy Green <andy@warmcat.com> licensed under LGPL2.1
+	(C) Copyright 2010-2011 Andy Green <andy@warmcat.com> licensed under MIT
 	 Compiled with SSL support, not using it
 	 Listening on port 7681
 	server sees client connect
@@ -318,7 +318,7 @@ give the `-c` switch and the server address at least:
 ```
 	$ libwebsockets-test-fraggle -c localhost
 	libwebsockets test fraggle
-	(C) Copyright 2010-2011 Andy Green <andy@warmcat.com> licensed under LGPL2.1
+	(C) Copyright 2010-2011 Andy Green <andy@warmcat.com> licensed under MIT
 	 Client mode
 	Connecting to localhost:7681
 	denied deflate-stream extension
@@ -391,8 +391,8 @@ version 13.
 
 Since libwebsockets runs using `poll()` and a single threaded approach, any
 unexpected latency coming from system calls would be bad news.  There's now
-a latency tracking scheme that can be built in with `--with-latency` at
-configure-time, logging the time taken for system calls to complete and if
+a latency tracking scheme that can be built in with `-DLWS_WITH_LATENCY=1` at
+cmake, logging the time taken for system calls to complete and if
 the whole action did complete that time or was deferred.
 
 You can see the detailed data by enabling logging level 512 (eg, `-d 519` on
@@ -417,7 +417,11 @@ server modes
 
 1) pip install autobahntestsuite
 
-2) From your build dir: cmake .. -DLWS_WITH_MINIMAL_EXAMPLES=1 && make
+2) From your build dir:
+
+```
+ $ cmake .. -DLWS_WITHOUT_EXTENSIONS=0 -DLWS_WITH_MINIMAL_EXAMPLES=1 && make
+```
 
 3) ../scripts/autobahn-test.sh
 
